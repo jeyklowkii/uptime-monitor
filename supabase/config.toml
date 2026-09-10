@@ -1,0 +1,31 @@
+project_id = "uptime-monitor"
+
+[api]
+enabled = true
+port = 54321
+
+[db]
+port = 54322
+
+[studio]
+enabled = true
+port = 54323
+
+[auth]
+enabled = true
+# No public sign-up in this app - the one admin account is created via
+# scripts/create-admin.js (see README). Keeping sign-ups disabled at the
+# platform level too is an extra safety net.
+enable_signup = false
+
+[functions.scheduled-monitor]
+# Called by an external cron service, not a logged-in user - see the
+# comment at the top of supabase/functions/scheduled-monitor/index.ts for
+# why. Auth is instead enforced inside the function via CRON_SECRET.
+verify_jwt = false
+
+[functions.check-now]
+verify_jwt = true
+
+[functions.send-test-email]
+verify_jwt = true

@@ -1,0 +1,27 @@
+{
+  "name": "uptime-monitor",
+  "private": true,
+  "version": "3.0.0",
+  "type": "module",
+  "description": "Website Uptime Monitoring & Email Alert Application - Supabase backend",
+  "scripts": {
+    "postinstall": "npm run install:frontend",
+    "install:frontend": "npm install --prefix frontend",
+    "dev": "concurrently -n frontend,supabase -c green,blue \"npm run dev --prefix frontend\" \"supabase start\"",
+    "dev:frontend-only": "npm run dev --prefix frontend",
+    "build": "npm run build --prefix frontend",
+    "test": "vitest run",
+    "supabase:start": "supabase start",
+    "supabase:stop": "supabase stop",
+    "db:push": "supabase db push",
+    "functions:serve": "supabase functions serve",
+    "functions:deploy": "supabase functions deploy check-now && supabase functions deploy send-test-email && supabase functions deploy scheduled-monitor --no-verify-jwt",
+    "create-admin": "node scripts/create-admin.js"
+  },
+  "devDependencies": {
+    "@supabase/supabase-js": "^2.115.0",
+    "concurrently": "^8.2.2",
+    "supabase": "^2.116.0",
+    "vitest": "^4.1.11"
+  }
+}
