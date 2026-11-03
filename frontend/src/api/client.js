@@ -1,5 +1,6 @@
 import { supabase, configError } from '../supabase.js';
 import { sanitizeWebsitePayload } from './websitePayload.js';
+import { sortByUrgency } from '../lib/sortByUrgency.js';
 
 // Every page in this app was originally written against Firestore, which
 // returns Timestamp objects rather than strings, so `fromDoc`-style
@@ -59,7 +60,7 @@ async function listWebsites() {
   // needed to stay cheap.
   const { data, error } = await supabase.rpc('dashboard_websites');
   if (error) throw error;
-  return data;
+  return sortByUrgency(data);
 }
 
 async function getWebsite(id) {
@@ -217,9 +218,27 @@ async function getPulse() {
 }
 
 async function getAnalytics() {
-  const { data, error } = await supabase.rpc('analytics_data');
+  // Both are calculated inside the database (see
+  // supabase/migrations/20260101000004_fleet_downtime_and_faster_analytics.sql):
+  //  - analytics_data(): per-site uptime, 30d response time and downtime
+  //  - fleet_downtime(): total downtime across ALL sites as a percentage,
+  //    for 24h / 7d / 30d / 90d - recalculated from the sites that exist
+  //    right now, so adding or removing a site needs no code changes.
+  // Doing the sums in SQL (instead of pulling incidents into the browser)
+  // avoids the API's 1000-row cap, which this app's incident volume exceeds.
+  const [analytics, fleet] = await Promise.all([supabase.rpc('analytics_data'), supabase.rpc('fleet_downtime')]);
+  if (analytics.error) throw analytics.error;
+  if (fleet.error) throw fleet.error;
+  return { ...analytics.data, fleetDowntime: fleet.data };
+}
+
+async function getResponseTimes() {
+  // Separate from getAnalytics() on purpose: this is the one query that scans
+  // the large `checks` table, so the Analytics page loads it independently
+  // and still shows everything else if it is slow or times out.
+  const { data, error } = await supabase.rpc('site_response_times');
   if (error) throw error;
-  return data;
+  return data ?? {};
 }
 
 export const api = {
@@ -254,4 +273,5 @@ export const api = {
   getSummary,
   getPulse,
   getAnalytics,
+  getResponseTimes,
 };
