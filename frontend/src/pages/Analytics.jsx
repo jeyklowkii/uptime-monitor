@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell } from 'recharts';
 import { api } from '../api/client.js';
 import { Card, Button, Skeleton, ErrorState, PageHeader, Select } from '../components/ui.jsx';
@@ -11,16 +11,24 @@ const STATUS_COLOR = { up: '#35D399', down: '#FB5A5A', degraded: '#F5B94D', unkn
 // Keys match what fleet_downtime() returns (supabase/migrations/...0004).
 const PERIODS = ['24h', '7d', '30d', '90d'];
 
+// site_response_times() builds its daily summary a few days per call, so on
+// first use the page asks again (briefly) until all days are covered.
+const BUILD_PAUSE_MS = 300;
+const MAX_BUILD_CALLS = 40;
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 export default function Analytics() {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [period, setPeriod] = useState('30d');
 
-  // The response-time chart is loaded on its own. It is the one query that
-  // scans the large checks table, so if it is slow (or times out) only the
-  // chart is affected - the downtime card and the table still show.
-  const [responseTimes, setResponseTimes] = useState(null); // { [websiteId]: ms } once loaded
+  // The response-time chart is loaded on its own. It reads a daily summary
+  // that builds itself a few days per call, so a slow or failing chart never
+  // takes the downtime card or the table down with it.
+  const [responseTimes, setResponseTimes] = useState(null); // { daysCovered, daysTotal, avgMs: { [websiteId]: ms } }
   const [responseTimesError, setResponseTimesError] = useState('');
+  const [building, setBuilding] = useState(false);
+  const runId = useRef(0); // lets a newer load (or leaving the page) cancel an older loop
 
   const load = useCallback(async () => {
     try {
@@ -32,25 +40,54 @@ export default function Analytics() {
   }, []);
 
   const loadResponseTimes = useCallback(async () => {
+    const myRun = ++runId.current;
+    const stale = () => runId.current !== myRun;
     setResponseTimes(null);
     setResponseTimesError('');
-    try {
-      setResponseTimes(await api.getResponseTimes());
-    } catch (err) {
-      setResponseTimesError(err.message);
+    setBuilding(false);
+
+    let lastCovered = -1;
+    for (let attempt = 0; attempt < MAX_BUILD_CALLS; attempt++) {
+      try {
+        const result = await api.getResponseTimes();
+        if (stale()) return;
+        setResponseTimes(result);
+        const covered = result?.daysCovered ?? 0;
+        const total = result?.daysTotal ?? 0;
+        // Done when every day is covered - or stop if a call made no progress.
+        if (covered >= total || covered <= lastCovered) {
+          setBuilding(false);
+          return;
+        }
+        lastCovered = covered;
+        setBuilding(true);
+      } catch (err) {
+        if (stale()) return;
+        setBuilding(false);
+        setResponseTimesError(err.message);
+        return;
+      }
+      await sleep(BUILD_PAUSE_MS);
+      if (stale()) return;
     }
+    if (!stale()) setBuilding(false);
   }, []);
 
   useEffect(() => {
     load();
     loadResponseTimes();
+    return () => {
+      runId.current += 1; // cancel any in-flight build loop when leaving the page
+    };
   }, [load, loadResponseTimes]);
 
   if (error && !data) return <ErrorState message={error} onRetry={load} />;
 
+  const avgMs = responseTimes?.avgMs ?? {};
   const chartData = (data?.perWebsite ?? [])
-    .filter((w) => responseTimes && responseTimes[w.websiteId] != null)
-    .map((w) => ({ name: w.name, ms: Number(responseTimes[w.websiteId]), status: w.status }));
+    .filter((w) => avgMs[w.websiteId] != null)
+    .map((w) => ({ name: w.name, ms: Number(avgMs[w.websiteId]), status: w.status }));
+  const partial = responseTimes && responseTimes.daysCovered < responseTimes.daysTotal;
 
   // All four periods arrive in one response, so switching the dropdown is
   // instant - no refetch. Recomputed from the sites that exist at load time.
@@ -99,6 +136,13 @@ export default function Analytics() {
 
           <Card className="p-5">
             <div className="mb-1 text-sm text-muted">Average response time, last 30 days</div>
+            {partial && !responseTimesError && (
+              <div className="mb-2 text-xs text-muted">
+                {building
+                  ? `Building history: ${responseTimes.daysCovered} of ${responseTimes.daysTotal} days so far...`
+                  : `Based on ${responseTimes.daysCovered} of ${responseTimes.daysTotal} days so far. Reload the page to keep filling it in.`}
+              </div>
+            )}
             {responseTimesError ? (
               <div className="py-8 text-center text-sm">
                 <div className="text-critical">Couldn&apos;t load response times: {responseTimesError}</div>

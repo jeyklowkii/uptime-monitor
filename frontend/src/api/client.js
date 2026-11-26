@@ -105,10 +105,17 @@ async function updateWebsite(id, payload) {
 }
 
 async function deleteWebsite(id) {
-  // `on delete cascade` (supabase/migrations) handles checks/incidents -
-  // no manual cleanup needed the way Firestore required.
-  const { error } = await supabase.from('websites').delete().eq('id', id);
-  if (error) throw error;
+  // Deleting a site also deletes its whole check history. As one statement
+  // that can exceed the database's statement timeout for a site with a long
+  // history ("canceling statement due to statement timeout"), so
+  // delete_website() (supabase/migrations/...0005) removes it in small batches
+  // and we call it until it reports done.
+  for (let i = 0; i < 500; i++) {
+    const { data, error } = await supabase.rpc('delete_website', { p_id: id });
+    if (error) throw error;
+    if (data?.done) return;
+  }
+  throw new Error('Deleting is taking unusually long - please try again.');
 }
 
 async function checkWebsiteNow(id) {

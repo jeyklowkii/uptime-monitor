@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { api } from '../api/client.js';
@@ -6,6 +6,7 @@ import { Card, Button, Skeleton, ErrorState } from '../components/ui.jsx';
 import StatusBadge from '../components/StatusBadge.jsx';
 import { IconChevronLeft, IconRefresh, IconExternal, IconEdit } from '../components/icons.jsx';
 import { useToast } from '../context/ToastContext.jsx';
+import { usePolling } from '../lib/usePolling.js';
 
 function fmtTime(iso) {
   return iso ? new Date(iso).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—';
@@ -29,13 +30,8 @@ export default function WebsiteDetails() {
     }
   }, [id]);
 
-  useEffect(() => {
-    load();
-    // 60s, not 15s - this reads up to 50 check rows each time; no reason
-    // to refresh faster than someone's actually watching the screen.
-    const t = setInterval(load, 60000);
-    return () => clearInterval(t);
-  }, [load]);
+    // Every 5 minutes, and only while this tab is visible (lib/usePolling.js).
+  usePolling(load, 5 * 60 * 1000);
 
   async function checkNow() {
     setChecking(true);

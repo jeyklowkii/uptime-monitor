@@ -13,6 +13,7 @@ export default function Websites() {
   const [error, setError] = useState('');
   const [pendingDelete, setPendingDelete] = useState(null);
   const [checkingId, setCheckingId] = useState(null);
+  const [deleting, setDeleting] = useState(false);
   const toast = useToast();
 
   const load = useCallback(async () => {
@@ -51,7 +52,9 @@ export default function Websites() {
     }
   }
 
-  async function confirmDelete() {
+    async function confirmDelete() {
+    if (deleting) return; // ignore a second click while a delete is still running
+    setDeleting(true);
     try {
       await api.deleteWebsite(pendingDelete.id);
       toast.success(`Removed ${pendingDelete.name}`);
@@ -59,6 +62,8 @@ export default function Websites() {
       load();
     } catch (err) {
       toast.error(err.message);
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -166,10 +171,10 @@ export default function Websites() {
         open={Boolean(pendingDelete)}
         title={`Delete ${pendingDelete?.name}?`}
         description="This removes the website and its full monitoring history. This can't be undone."
-        confirmLabel="Delete"
+        confirmLabel={deleting ? 'Deleting...' : 'Delete'}
         danger
         onConfirm={confirmDelete}
-        onCancel={() => setPendingDelete(null)}
+        onCancel={() => !deleting && setPendingDelete(null)}
       />
     </div>
   );
